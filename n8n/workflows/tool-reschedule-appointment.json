@@ -1,0 +1,228 @@
+{
+  "id": "FK9P24mIWJfyvTCV",
+  "name": "Tool: Reschedule appointment",
+  "description": "Agent tool: moves an appointment to another free day/time (same booking code and service), validated in the database, and updates its Google Calendar event.",
+  "active": false,
+  "nodes": [
+    {
+      "id": "d84f8912-39df-466b-b969-0ce15f99858d",
+      "name": "When the agent reschedules",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "booking_code",
+              "type": "string"
+            },
+            {
+              "name": "date",
+              "type": "string"
+            },
+            {
+              "name": "time",
+              "type": "string"
+            },
+            {
+              "name": "phone",
+              "type": "string"
+            },
+            {
+              "name": "full_name",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "511c60f1-fe9d-4121-b6cf-aca3fd6d3fab",
+      "name": "Reschedule in database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.reschedule_appointment($1, $2, $3::date, $4::time, NULLIF($5, '')) AS r;",
+        "options": {
+          "queryReplacement": "={{ [$json.phone, $json.booking_code, $json.date, $json.time, $json.full_name || ''] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "e7f48fd5-3bfb-4bc8-b793-9234a3048654",
+      "name": "Move Google Calendar event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "resource": "event",
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__GOOGLE_CALENDAR_ID__",
+          "cachedResultName": "Clinic calendar"
+        },
+        "eventId": "={{ $json.r.ok && $json.r.google_event_id ? $json.r.google_event_id : \"no-event\" }}",
+        "updateFields": {
+          "start": "={{ $json.r.starts_at }}",
+          "end": "={{ $json.r.ends_at }}"
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "YuVyTsCz6Jv4vpYH",
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a78c66d8-03b7-4639-8dab-a13e70dee718",
+      "name": "Mark calendar synced",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.set_google_event(NULLIF($1, '')::int, NULLIF($2, ''));",
+        "options": {
+          "queryReplacement": "={{ [String($('Reschedule in database').first().json.r.appointment_id || ''), $json.id || ''] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ad3c423e-b67f-4cea-9fb5-772d01139a4b",
+      "name": "Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "value": "={{ $('Reschedule in database').first().json.r.ok }}",
+              "type": "boolean"
+            },
+            {
+              "id": "booking_code",
+              "name": "booking_code",
+              "value": "={{ $('Reschedule in database').first().json.r.booking_code || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "date",
+              "name": "date",
+              "value": "={{ $('Reschedule in database').first().json.r.date || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "time",
+              "name": "time",
+              "value": "={{ $('Reschedule in database').first().json.r.time || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "value": "={{ $('Reschedule in database').first().json.r.message }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "When the agent reschedules": {
+      "main": [
+        [
+          {
+            "node": "Reschedule in database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reschedule in database": {
+      "main": [
+        [
+          {
+            "node": "Move Google Calendar event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move Google Calendar event": {
+      "main": [
+        [
+          {
+            "node": "Mark calendar synced",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark calendar synced": {
+      "main": [
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

@@ -1,0 +1,81 @@
+name: sms-ai-receptionist
+
+services:
+  postgres:
+    build: ./postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Only reachable from this machine (DBeaver, psql). n8n uses the internal network.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5435}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Applies database/migrations (once each) and database/functions (when they change), then exits
+  flyway:
+    image: flyway/flyway:11
+    command: migrate
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      FLYWAY_USER: ${POSTGRES_USER}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD}
+      FLYWAY_SCHEMAS: dental_clinic
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql/migrations,filesystem:/flyway/sql/functions
+      FLYWAY_CONNECT_RETRIES: 10
+    volumes:
+      - ./database/migrations:/flyway/sql/migrations:ro
+      - ./database/functions:/flyway/sql/functions:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-2.40.5}
+    restart: unless-stopped
+    environment:
+      GENERIC_TIMEZONE: America/New_York
+      TZ: America/New_York
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      # The Code node that checks the Twilio signature needs Node's crypto module
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+    volumes:
+      - n8n_data:/home/node/.n8n
+      # Versioned workflows + setup/export helpers (see scripts/)
+      - ./n8n:/repo
+    ports:
+      - "${N8N_HOST_PORT:-5680}:5678"
+    # Lets n8n reach services published on this machine (the RAG search API) on Linux too
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
+
+  # Optional public HTTPS tunnel for the Twilio webhook: docker compose --profile tunnel up -d
+  ngrok:
+    image: ngrok/ngrok:3
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    command: http --url=${NGROK_DOMAIN} n8n:5678
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      - "127.0.0.1:4040:4040"
+    depends_on:
+      - n8n
+
+volumes:
+  postgres_data:
+    name: ${POSTGRES_VOLUME:-sms_ai_receptionist_postgres}
+  n8n_data:
+    name: ${N8N_VOLUME:-sms_ai_receptionist_n8n}

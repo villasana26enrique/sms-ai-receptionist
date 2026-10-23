@@ -1,0 +1,312 @@
+{
+  "id": "tCInZXEmBEsGlo9t",
+  "name": "Tool: Book appointment",
+  "description": "Agent tool: books the appointment in the database (validation, booking code, overlap constraint) and mirrors it as a Google Calendar event.",
+  "active": false,
+  "nodes": [
+    {
+      "id": "0ec9e9cd-412f-4b74-befb-4f20c959214a",
+      "name": "When the agent books",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "date",
+              "type": "string"
+            },
+            {
+              "name": "time",
+              "type": "string"
+            },
+            {
+              "name": "full_name",
+              "type": "string"
+            },
+            {
+              "name": "service",
+              "type": "string"
+            },
+            {
+              "name": "phone",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fff53617-c8e8-4bc3-ba24-3e12bd3d5246",
+      "name": "Book in database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.book_appointment($1, $2, $3, $4::date, $5::time) AS r;",
+        "options": {
+          "queryReplacement": "={{ [$json.phone, $json.full_name, $json.service, $json.date, $json.time] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "b5f2e306-925a-4752-b3b3-767c8dde4bbb",
+      "name": "Booked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.r.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "123aa811-eab3-4ea2-9a40-b6d2d4c2cb1c",
+      "name": "Create Google Calendar event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "event",
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__GOOGLE_CALENDAR_ID__",
+          "cachedResultName": "Clinic calendar"
+        },
+        "start": "={{ $json.r.starts_at }}",
+        "end": "={{ $json.r.ends_at }}",
+        "additionalFields": {
+          "summary": "={{ $json.r.service }} - {{ $json.r.patient }}",
+          "description": "=Booking code: {{ $json.r.booking_code }}\nPatient: {{ $json.r.patient }}\nService: {{ $json.r.service }}\nPhone: +{{ $('When the agent books').item.json.phone }}\nBooked by the SMS assistant (the appointment lives in the database)."
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "YuVyTsCz6Jv4vpYH",
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "6e25b038-c824-4f2a-9226-590d25e84f2e",
+      "name": "Link event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.set_google_event($1::int, NULLIF($2, ''));",
+        "options": {
+          "queryReplacement": "={{ [$('Book in database').item.json.r.appointment_id, $json.id || ''] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "8043b468-7b2e-4a54-91d8-6a723d6b676b",
+      "name": "Result: booked",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "booking_code",
+              "name": "booking_code",
+              "value": "={{ $('Book in database').item.json.r.booking_code }}",
+              "type": "string"
+            },
+            {
+              "id": "service",
+              "name": "service",
+              "value": "={{ $('Book in database').item.json.r.service }}",
+              "type": "string"
+            },
+            {
+              "id": "date",
+              "name": "date",
+              "value": "={{ $('Book in database').item.json.r.date }}",
+              "type": "string"
+            },
+            {
+              "id": "time",
+              "name": "time",
+              "value": "={{ $('Book in database').item.json.r.time }}",
+              "type": "string"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "value": "={{ $('Book in database').item.json.r.message }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8d03e784-d56a-4d09-b31f-7a722076279a",
+      "name": "Result: not booked",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        672,
+        192
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "value": "={{ $json.r.message }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When the agent books": {
+      "main": [
+        [
+          {
+            "node": "Book in database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Book in database": {
+      "main": [
+        [
+          {
+            "node": "Booked?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booked?": {
+      "main": [
+        [
+          {
+            "node": "Create Google Calendar event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Result: not booked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Google Calendar event": {
+      "main": [
+        [
+          {
+            "node": "Link event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Link event": {
+      "main": [
+        [
+          {
+            "node": "Result: booked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

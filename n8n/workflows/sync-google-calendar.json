@@ -1,0 +1,523 @@
+{
+  "id": "6j99EaNwCWiWzInA",
+  "name": "Sync appointments to Google Calendar",
+  "description": "Every 15 minutes: creates, moves or deletes Google Calendar events for appointments whose calendar_synced flag is false, so the calendar catches up when Google fails.",
+  "active": false,
+  "nodes": [
+    {
+      "id": "0875ac47-abc8-4561-97cd-eec5d0aad979",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "61e29a92-3c29-4149-8f99-15bb6a608ea8",
+      "name": "Appointments to sync",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Appointments whose Google Calendar mirror does not reflect their latest change yet.\n-- Changes from the last 2 minutes are skipped so we do not race the agent tools.\nSELECT a.id AS appointment_id, a.booking_code, a.status, a.google_event_id,\n       s.name AS service, p.full_name AS patient, p.phone,\n       a.starts_at, a.ends_at\nFROM dental_clinic.appointments a\nJOIN dental_clinic.services s ON s.id = a.service_id\nJOIN dental_clinic.patients p ON p.id = a.patient_id\nWHERE NOT a.calendar_synced\n  AND a.updated_at < now() - interval '2 minutes'\n  AND (a.status = 'cancelled' OR a.ends_at > now())\nORDER BY a.updated_at\nLIMIT 50;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "9273b798-46fa-4cd1-96a4-4cee9c725c86",
+      "name": "What needs to happen?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        176
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "renameOutput": true,
+              "outputKey": "create",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status === 'confirmed' && !$json.google_event_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "renameOutput": true,
+              "outputKey": "move",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status === 'confirmed' && !!$json.google_event_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "renameOutput": true,
+              "outputKey": "delete",
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status === 'cancelled' && !!$json.google_event_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b9ee1805-cfaf-4b59-952a-1e4cebaf2ceb",
+      "name": "Create event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "event",
+        "operation": "create",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__GOOGLE_CALENDAR_ID__",
+          "cachedResultName": "Clinic calendar"
+        },
+        "start": "={{ $json.starts_at }}",
+        "end": "={{ $json.ends_at }}",
+        "additionalFields": {
+          "summary": "={{ $json.service }} - {{ $json.patient }}",
+          "description": "=Booking code: {{ $json.booking_code }}\nPatient: {{ $json.patient }}\nService: {{ $json.service }}\nPhone: +{{ $json.phone }}\nCreated by the sync workflow (the appointment lives in the database)."
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "YuVyTsCz6Jv4vpYH",
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c99f842b-0088-4605-b3e7-2c587448c2ec",
+      "name": "Created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "666fc443-64fe-410d-859c-deaa85ee5916",
+      "name": "Link created event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.set_google_event($1::int, $2);",
+        "options": {
+          "queryReplacement": "={{ [$('Appointments to sync').item.json.appointment_id, $json.id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "6ea1f1c1-b17d-4eba-99c7-66c3e884066e",
+      "name": "Move event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        192
+      ],
+      "parameters": {
+        "resource": "event",
+        "operation": "update",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__GOOGLE_CALENDAR_ID__",
+          "cachedResultName": "Clinic calendar"
+        },
+        "eventId": "={{ $json.google_event_id }}",
+        "updateFields": {
+          "start": "={{ $json.starts_at }}",
+          "end": "={{ $json.ends_at }}"
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "YuVyTsCz6Jv4vpYH",
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "9bf5c505-7dab-4365-94c2-971e2fedc622",
+      "name": "Moved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        192
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ced0324a-d367-41c5-8693-1fb7ef9558f7",
+      "name": "Mark moved",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        192
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.set_google_event($1::int, $2);",
+        "options": {
+          "queryReplacement": "={{ [$('Appointments to sync').item.json.appointment_id, $json.id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "a785f4e8-0fe0-40e5-afe5-1fba585ac161",
+      "name": "Delete event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        672,
+        384
+      ],
+      "parameters": {
+        "resource": "event",
+        "operation": "delete",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__GOOGLE_CALENDAR_ID__",
+          "cachedResultName": "Clinic calendar"
+        },
+        "eventId": "={{ $json.google_event_id }}",
+        "options": {}
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "YuVyTsCz6Jv4vpYH",
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "6faa9f04-b407-46e1-b447-496016517ecf",
+      "name": "Deleted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        384
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.success === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2d273261-c1e5-4ada-ab12-1f6174b50793",
+      "name": "Mark deleted",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        384
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.mark_google_event_deleted($1::int);",
+        "options": {
+          "queryReplacement": "={{ [$('Appointments to sync').item.json.appointment_id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Appointments to sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointments to sync": {
+      "main": [
+        [
+          {
+            "node": "What needs to happen?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "What needs to happen?": {
+      "main": [
+        [
+          {
+            "node": "Create event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Move event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Delete event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create event": {
+      "main": [
+        [
+          {
+            "node": "Created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Created?": {
+      "main": [
+        [
+          {
+            "node": "Link created event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move event": {
+      "main": [
+        [
+          {
+            "node": "Moved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Moved?": {
+      "main": [
+        [
+          {
+            "node": "Mark moved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete event": {
+      "main": [
+        [
+          {
+            "node": "Deleted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deleted?": {
+      "main": [
+        [
+          {
+            "node": "Mark deleted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

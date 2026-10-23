@@ -1,0 +1,211 @@
+{
+  "id": "5Iy94ttvJAAoeHMJ",
+  "name": "Tool: Cancel appointment",
+  "description": "Agent tool: cancels an appointment by booking code (same number, or code + patient's full name) and deletes its Google Calendar event; the sync workflow completes it if Google fails.",
+  "active": false,
+  "nodes": [
+    {
+      "id": "1cf43769-3397-42c9-b77a-d50df1e0ee24",
+      "name": "When the agent cancels",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "booking_code",
+              "type": "string"
+            },
+            {
+              "name": "phone",
+              "type": "string"
+            },
+            {
+              "name": "full_name",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "25271446-4281-47ff-99e3-0b898b99fe5a",
+      "name": "Cancel in database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.cancel_appointment($1, $2, NULLIF($3, '')) AS r;",
+        "options": {
+          "queryReplacement": "={{ [$json.phone, $json.booking_code, $json.full_name || ''] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "762dcfe6-aff4-4bd3-824a-8181198b46bc",
+      "name": "Delete Google Calendar event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "resource": "event",
+        "operation": "delete",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "__GOOGLE_CALENDAR_ID__",
+          "cachedResultName": "Clinic calendar"
+        },
+        "eventId": "={{ $json.r.ok && $json.r.google_event_id ? $json.r.google_event_id : \"no-event\" }}",
+        "options": {}
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "YuVyTsCz6Jv4vpYH",
+          "name": "Google Calendar account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "3696e6fa-ba05-437a-bf8a-75845bc63f27",
+      "name": "Mark event deleted",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.mark_google_event_deleted($1::int) WHERE $2::boolean;",
+        "options": {
+          "queryReplacement": "={{ [$('Cancel in database').first().json.r.appointment_id || 0, $json.success === true] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "f0d6b0dd-59f8-4d51-8ace-e4eee6a2f00a",
+      "name": "Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "ok",
+              "value": "={{ $('Cancel in database').first().json.r.ok }}",
+              "type": "boolean"
+            },
+            {
+              "id": "booking_code",
+              "name": "booking_code",
+              "value": "={{ $('Cancel in database').first().json.r.booking_code || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "less_than_24h",
+              "name": "less_than_24h",
+              "value": "={{ $('Cancel in database').first().json.r.less_than_24h || false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "value": "={{ $('Cancel in database').first().json.r.message }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "When the agent cancels": {
+      "main": [
+        [
+          {
+            "node": "Cancel in database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancel in database": {
+      "main": [
+        [
+          {
+            "node": "Delete Google Calendar event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Google Calendar event": {
+      "main": [
+        [
+          {
+            "node": "Mark event deleted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark event deleted": {
+      "main": [
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

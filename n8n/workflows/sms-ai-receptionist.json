@@ -1,0 +1,1063 @@
+{
+  "id": "sM3rT8wQ2kV6nB4x",
+  "name": "SMS AI Receptionist",
+  "description": "Twilio SMS webhook (signature checked) -> 8-second message buffer -> AI agent with booking tools and clinic documents -> SMS reply through the Twilio API.",
+  "active": false,
+  "nodes": [
+    {
+      "id": "c642f0ff-5eee-4218-a893-0415b0206818",
+      "name": "Wait 8 s for more messages",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2240,
+        416
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 8,
+        "unit": "seconds"
+      },
+      "webhookId": "c8b04ace-94ef-4595-95b3-1c0c9c7c0f92"
+    },
+    {
+      "id": "edbf57a9-23a0-4008-adb6-51e2df46e97e",
+      "name": "Merge pending messages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        416
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Only the execution of the latest message from this number continues; the others end silently\nconst current = $('Verify Twilio signature').first().json;\nconst rows = $input.all().map(i => i.json).filter(r => r.message_id);\nif (!rows.length || rows[rows.length - 1].message_id !== current.message_id) {\n  return [];\n}\n\nreturn [{ json: {\n  ...current,\n  text: rows.map(r => r.text).join('\\n'),\n  message_count: rows.length,\n  last_buffer_id: Math.max(...rows.map(r => Number(r.id)))\n} }];"
+      }
+    },
+    {
+      "id": "e85e3ef0-409f-49a1-bc57-96601a450b82",
+      "name": "Combined message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        3136,
+        416
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "phone",
+              "name": "phone",
+              "value": "={{ $('Merge pending messages').first().json.phone }}",
+              "type": "string"
+            },
+            {
+              "id": "text",
+              "name": "text",
+              "value": "={{ $('Merge pending messages').first().json.text }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "a9826102-5063-46db-aa31-79dc34d45fbe",
+      "name": "Agent settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        3360,
+        416
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "model",
+              "name": "model",
+              "value": "models/gemini-3.1-flash-lite",
+              "type": "string"
+            },
+            {
+              "id": "system_prompt",
+              "name": "system_prompt",
+              "value": "You are the text message (SMS) assistant for Maple Grove Dental Studio, a family dental clinic in New York City. You answer patient questions and book, check, reschedule and cancel appointments.\n\nClinic information (together with the passages returned by search_clinic_documents, the ONLY facts you may use):\n- Address: 318 W 57th St, Suite 3, New York, NY 10019 (Midtown Manhattan, near Columbus Circle). Closest subway: 59 St-Columbus Circle.\n- Hours: Monday to Friday 8:00 AM - 6:00 PM, Saturday 9:00 AM - 1:00 PM, closed Sunday.\n- Phone for emergencies and calls: (212) 555-0147.\n- Services (exact names), duration and starting prices (without insurance):\n  - Toothache / emergency exam (30 min; exam + X-ray of the painful area, the dentist then recommends treatment): $79\n  - New patient exam + X-rays + cleaning (60 min): $149\n  - Routine cleaning (60 min): $99\n  - Teeth whitening (in-office) (90 min): $350\n  - Tooth-colored filling (60 min): from $180\n  - Root canal (90 min): from $900\n  - Dental implant consultation (30 min): free\n  - Invisalign consultation (30 min): free\n- Insurance: we accept Delta Dental, Cigna, Aetna, MetLife and Guardian. We also offer an in-house membership plan ($29/month, includes 2 cleanings a year and 15% off treatments).\n- Payment: cash, card, CareCredit and 0% financing for treatments over $1,000.\n- Cancellation policy: please cancel at least 24 hours in advance.\n\nHow to behave:\n- Reply in the same language the patient writes in.\n- Keep replies short, friendly and natural, like a helpful receptionist texting: 1 to 3 short sentences, ideally under 300 characters (every 160 characters is billed as another SMS). Plain text only: no markdown, no bullet lists, no emojis.\n- Use the current date and time you are given to answer questions like \"are you open now?\" and to turn relative days (\"Wednesday\", \"tomorrow\") into a concrete date.\n\nYour tools:\n- check_availability(date, service): free start times for that service on that day (accounts for duration). ALWAYS call it before offering or accepting any time. Never invent availability.\n- book_appointment(date, time, full_name, service): books a new appointment and returns its booking code.\n- get_my_appointments(): lists the upcoming appointments of the patient who is writing (by their mobile number), with booking codes.\n- cancel_appointment(booking_code, full_name): cancels an appointment by booking code.\n- reschedule_appointment(booking_code, date, time, full_name): moves an appointment to another free day/time, keeping its booking code and service.\n- search_clinic_documents(question): searches the clinic documents (aftercare instructions, insurance coverage, payments and financing, cancellation and missed-appointment fees, dental emergencies, the first visit, children, accessibility) and returns passages with their source.\n\nBooking a new appointment:\n- First make sure you know the service, then ask which day the patient prefers (do not assume a day), check availability and offer 2 or 3 free times (not the whole list). If the day is closed or full, say so and offer another day. If they ask for morning or afternoon, offer times in that part of the day.\n- The service must be one from the clinic list, using its exact name. If the patient has pain and does not know what they need, use \"Toothache / emergency exam\". If what they said does not clearly match one service, ask which one. Never pick an unrelated service.\n- Full name: text messages do not include it, so ask for the patient's full name before booking.\n- Before booking, ALWAYS send a short summary and ask for confirmation, e.g. \"I'll book: Routine cleaning, Monday, October 5 at 2:00 PM, for Enrique Villasana. Shall I confirm it?\". Call book_appointment ONLY when the patient's LATEST message clearly says yes to that summary.\n- When it returns ok=true, confirm service, full date and time, and give the booking code (e.g. MG-7K3QX), telling the patient to keep it. If ok=false, explain briefly and offer other times.\n\nChecking, rescheduling or cancelling:\n- When the patient asks about their appointments, call get_my_appointments first (you do not need to ask for the code). If they have one, refer to it by service, date and time; if several, ask which one. If none are found, the patient may be writing from a different number: ask for the booking code and the patient's full name.\n- Use the patient's full name in the full_name parameter ONLY when they write from a number different from the one used to book; otherwise send an empty string.\n- To reschedule: confirm which appointment, ask for the new day, call check_availability with that appointment's service, offer 2 or 3 times, summarize the change (from old date/time to new date/time) and call reschedule_appointment ONLY after a clear yes in the latest message.\n- To cancel: summarize which appointment will be cancelled and call cancel_appointment ONLY after a clear yes in the latest message. If the result says less_than_24h=true, kindly remind them of the 24-hour cancellation policy. After cancelling, offer to book a new time.\n- Never reveal or confirm appointments that are not returned by the tools.\n\nQuestions about the clinic documents:\n- For questions about aftercare, insurance coverage, payments and financing, late cancellation fees, what to do in an emergency, the first visit or other clinic policies, call search_clinic_documents with a short question in English, then answer ONLY with what the passages say, in the patient's language and in 1 to 3 short sentences. You may name the document naturally (e.g. \"according to our aftercare guide\").\n- Prices, opening hours and availability come from the clinic information above and from the booking tools, not from the documents.\n- If the tool says there is no relevant information, OR the passages do not explicitly answer the exact question asked, say you do not have that information and offer to have a team member follow up or to call (212) 555-0147. Passages about a different treatment do not answer the question. Never infer from related passages and never add general advice such as \"usually you can...\".\n\nHealth questions: never diagnose or recommend medication (you cannot say whether a medicine is OK to take). For normal discomfort, say you cannot give medical advice and offer to book a toothache / emergency exam. Only for severe pain, facial swelling, bleeding that will not stop, trauma or a knocked-out tooth, tell them to call (212) 555-0147 right away, or 911 if it is life-threatening. Then call search_clinic_documents and briefly share the clinic's own first-aid steps for that situation (for example, how to keep a knocked-out tooth until they arrive): time matters, and these steps come from the clinic.\n\nIf a patient asks about a service that is not in the clinic's service list, say it is not among the services the clinic offers and offer to have a team member follow up; do not describe or rule out treatments beyond that.\n\nIf you do not know something or it is not in the clinic information or the documents, say so honestly and offer to have a team member follow up. Never invent prices, availability or policies.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3c5ceb05-58d0-4703-bfa3-092ddd4eb3e8",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        3904,
+        416
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "hasOutputParser": false,
+        "options": {
+          "systemMessage": "={{ $json.system_prompt }}\n\nCurrent date and time at the clinic (New York): {{ $now.setZone('America/New_York').toFormat(\"cccc, LLLL d, yyyy, h:mm a\") }}.\n\nText messages do not include the patient's name. Greet the patient only at the start of a new conversation; in follow-up messages, continue naturally without greeting again.\n\nIMPORTANT: you cannot send a message later. Each reply you write is final until the patient writes again. Never say \"let me check\", \"I'll check\" or \"one moment\". If you need availability, call check_availability NOW, in this same turn, and reply with the actual free times.",
+          "enableStreaming": false,
+          "maxTokensFromMemory": 8000
+        },
+        "needsFallback": true
+      },
+      "retryOnFail": true,
+      "maxTries": 4,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2aa4daa3-5ee0-4e9d-8357-cabb7978e1d5",
+      "name": "Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        3584,
+        640
+      ],
+      "parameters": {
+        "modelName": "={{ $('Agent settings').item.json.model }}",
+        "options": {
+          "maxOutputTokens": 2048
+        }
+      },
+      "credentials": {
+        "googlePalmApi": {
+          "id": "PagpXlhagAXnBBZ8",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "id": "ce3b3ef6-ac87-4783-8079-cca97f238c19",
+      "name": "Chat memory (Postgres)",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.4,
+      "position": [
+        3712,
+        640
+      ],
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Verify Twilio signature').first().json.phone }}",
+        "tableName": "dental_clinic.chat_history",
+        "contextWindowLength": 10
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "9031e99e-bd8c-4b1c-b0fd-3b0a828eb16b",
+      "name": "check_availability",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        3840,
+        640
+      ],
+      "parameters": {
+        "description": "Returns the free start times on a day for a specific service, taking the service duration into account. ALWAYS use it before offering or accepting a time.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "u4zk3B48hPfoFaaa",
+          "cachedResultName": "Tool: Check availability"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('date', 'Day to check, format YYYY-MM-DD') }}",
+            "service": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('service', 'Exact service name from the clinic list, e.g. Routine cleaning') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "date",
+              "displayName": "date"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "service",
+              "displayName": "service"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "bea09d14-96da-4f6e-acc7-d3c308b9b5be",
+      "name": "book_appointment",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        3968,
+        640
+      ],
+      "parameters": {
+        "description": "Books an appointment in the clinic database (and mirrors it in the calendar). Returns ok=true with the booking code, or ok=false with the reason.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "tCInZXEmBEsGlo9t",
+          "cachedResultName": "Tool: Book appointment"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('date', 'Appointment day, format YYYY-MM-DD') }}",
+            "time": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('time', 'Start time, 24-hour HH:mm format, one of the free times') }}",
+            "full_name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('full_name', \"Patient's full name\") }}",
+            "service": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('service', 'Exact service name from the clinic list') }}",
+            "phone": "={{ $('Verify Twilio signature').first().json.phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "date",
+              "displayName": "date"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "time",
+              "displayName": "time"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "full_name",
+              "displayName": "full_name"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "service",
+              "displayName": "service"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "phone",
+              "displayName": "phone"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "03fd7f20-3401-4e1d-9fde-c7fd6808b336",
+      "name": "get_my_appointments",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4096,
+        640
+      ],
+      "parameters": {
+        "description": "Returns the upcoming confirmed appointments of the patient who is writing (by their mobile number), with booking code, service, date and time. Takes no parameters.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "4e88mmZwNoHCeo16",
+          "cachedResultName": "Tool: Get my appointments"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "phone": "={{ $('Verify Twilio signature').first().json.phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "phone",
+              "displayName": "phone"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "ddb38da4-4576-4bad-bb98-1bbb302b4820",
+      "name": "cancel_appointment",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4224,
+        640
+      ],
+      "parameters": {
+        "description": "Cancels an appointment by its booking code. Returns ok=true, or ok=false with the reason. less_than_24h=true means it was cancelled with less than 24 hours notice.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "5Iy94ttvJAAoeHMJ",
+          "cachedResultName": "Tool: Cancel appointment"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_code": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('booking_code', 'Booking code of the appointment, e.g. MG-7K3QX') }}",
+            "full_name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('full_name', \"Patient's full name, ONLY if the patient writes from a number different from the one used to book; otherwise an empty string\") }}",
+            "phone": "={{ $('Verify Twilio signature').first().json.phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "booking_code",
+              "displayName": "booking_code"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "phone",
+              "displayName": "phone"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "full_name",
+              "displayName": "full_name"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "aec50c85-b5fe-435e-9442-f1de178435b3",
+      "name": "reschedule_appointment",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4352,
+        640
+      ],
+      "parameters": {
+        "description": "Moves an existing appointment (same booking code and service) to another free day and time. Check check_availability with that appointment's service first. Returns ok=true, or ok=false with the reason.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "FK9P24mIWJfyvTCV",
+          "cachedResultName": "Tool: Reschedule appointment"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_code": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('booking_code', 'Booking code of the appointment, e.g. MG-7K3QX') }}",
+            "date": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('date', 'New day, format YYYY-MM-DD') }}",
+            "time": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('time', 'New start time, 24-hour HH:mm format, one of the free times') }}",
+            "full_name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('full_name', \"Patient's full name, ONLY if the patient writes from a number different from the one used to book; otherwise an empty string\") }}",
+            "phone": "={{ $('Verify Twilio signature').first().json.phone }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "booking_code",
+              "displayName": "booking_code"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "date",
+              "displayName": "date"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "time",
+              "displayName": "time"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "phone",
+              "displayName": "phone"
+            },
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "full_name",
+              "displayName": "full_name"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      }
+    },
+    {
+      "id": "1cb415f6-92f6-4d91-bfe9-5784e2ed6b7f",
+      "name": "Save to buffer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2016,
+        320
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- ON CONFLICT: a message delivered twice is buffered (and answered) only once\nINSERT INTO dental_clinic.pending_messages (phone, message_id, text)\nVALUES ($1, $2, $3)\nON CONFLICT (message_id) DO NOTHING\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [$('Verify Twilio signature').first().json.phone, $('Verify Twilio signature').first().json.message_id, $('Verify Twilio signature').first().json.text] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "1d87ad53-5a8c-4ba2-9ba2-7014fbb8d6ec",
+      "name": "Read pending messages",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2464,
+        416
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, message_id, text\nFROM dental_clinic.pending_messages\nWHERE phone = $1\nORDER BY id;",
+        "options": {
+          "queryReplacement": "={{ [$('Verify Twilio signature').first().json.phone] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "id": "a850cec4-fd42-40c3-a210-8fd5e65c242f",
+      "name": "Clear buffer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2912,
+        416
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Only up to the last id read: a message that arrived meanwhile stays for its own execution\nDELETE FROM dental_clinic.pending_messages\nWHERE phone = $1 AND id <= $2::bigint;",
+        "options": {
+          "queryReplacement": "={{ [$json.phone, $json.last_buffer_id] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "description": "Searches the clinic documents (aftercare, insurance, payments, policies, emergencies, first visit) and returns the relevant passages with their source.",
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "K5dRw9Tn3QxP7mZb",
+          "cachedResultName": "Tool: Search clinic documents"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "question": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('question', 'Short standalone question in English, e.g. How long should I avoid coffee after teeth whitening?') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false,
+              "id": "question",
+              "displayName": "question"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "tool-search-clinic-documents",
+      "name": "search_clinic_documents",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        4480,
+        640
+      ]
+    },
+    {
+      "id": "gemini-fallback-model",
+      "name": "Gemini Fallback Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        3724,
+        760
+      ],
+      "parameters": {
+        "modelName": "models/gemini-flash-lite-latest",
+        "options": {
+          "maxOutputTokens": 2048
+        }
+      },
+      "credentials": {
+        "googlePalmApi": {
+          "id": "PagpXlhagAXnBBZ8",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "twilio/sms",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        896,
+        416
+      ],
+      "id": "e7d4cf2e-6178-42ea-87c5-b279a5033d2f",
+      "name": "Incoming SMS (Twilio)",
+      "webhookId": "0b07039f-9605-46a9-82cc-f659b5b539d5"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Twilio signs every webhook: base64(HMAC-SHA1(Auth Token, URL + every POST parameter name and value, sorted by name)).\n// Both values are filled in at import (scripts/reload-workflows.sh); while they are placeholders every request is rejected.\nconst crypto = require('crypto');\nconst AUTH_TOKEN = '__TWILIO_AUTH_TOKEN__';\nconst WEBHOOK_URL = '__TWILIO_WEBHOOK_URL__';\n\nconst { headers = {}, body = {} } = $input.first().json;\nconst signed = WEBHOOK_URL + Object.keys(body).sort().map(key => key + body[key]).join('');\nconst expected = crypto.createHmac('sha1', AUTH_TOKEN).update(signed, 'utf8').digest('base64');\nconst received = String(headers['x-twilio-signature'] || '');\nconst configured = !AUTH_TOKEN.startsWith('__') && !WEBHOOK_URL.startsWith('__');\nconst valid = configured && received.length === expected.length\n  && crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected));\n\nreturn [{ json: {\n  valid,\n  // \"+15551234567\" (SMS) or \"whatsapp:+15551234567\" (Twilio WhatsApp): replies go back to the same address\n  from: String(body.From || ''),\n  to: String(body.To || ''),\n  phone: String(body.From || '').replace(/\\D/g, ''),\n  message_id: String(body.MessageSid || ''),\n  text: String(body.Body || '').trim()\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        416
+      ],
+      "id": "0e124c1e-c4fb-46c8-a4f5-a0d2baf1d011",
+      "name": "Verify Twilio signature"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1344,
+        416
+      ],
+      "id": "b3799d23-1435-4099-8495-61027f820ae7",
+      "name": "Valid signature?"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/xml"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1568,
+        320
+      ],
+      "id": "0a8c78ad-4ffb-460c-9963-3ca49ab4fe73",
+      "name": "Acknowledge Twilio (empty TwiML)"
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1568,
+        512
+      ],
+      "id": "718ef0ad-7b37-4c7b-93e5-e8a512ffdce3",
+      "name": "Reject (403)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $('Verify Twilio signature').first().json.text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "leftValue": "={{ /^(stop|stopall|unsubscribe|cancel|end|quit|start|unstop|help|info)$/i.test($('Verify Twilio signature').first().json.text) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1792,
+        320
+      ],
+      "id": "d95b183e-9272-47f0-aef8-21eccbe40e7d",
+      "name": "Should the agent reply?"
+    },
+    {
+      "parameters": {
+        "from": "={{ $('Verify Twilio signature').first().json.to }}",
+        "to": "={{ $('Verify Twilio signature').first().json.from }}",
+        "message": "={{ ($('AI Agent').first().json.output || (/[¿¡ñáéíóú]|\\b(hola|que|qué|cuanto|cuánto|puedo|quiero|tengo|gracias|cómo|dónde)\\b/i.test($('Combined message').first().json.text || '') ? 'Disculpa, ahora mismo no puedo responder. Intenta de nuevo en un minuto o llama al (212) 555-0147.' : 'Sorry, I cannot answer right now. Please try again in a minute or call (212) 555-0147.')) || 'Sorry, something went wrong on our side. A team member will get back to you shortly.' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        4352,
+        416
+      ],
+      "id": "bc18a22e-44f8-4656-9c7c-271bc226b30e",
+      "name": "Send SMS reply",
+      "credentials": {
+        "twilioApi": {
+          "id": "tW5sM2nQ8rK4xP7v",
+          "name": "Twilio account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Combined message": {
+      "main": [
+        [
+          {
+            "node": "Agent settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent settings": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send SMS reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat memory (Postgres)": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_availability": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "book_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_my_appointments": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cancel_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reschedule_appointment": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to buffer": {
+      "main": [
+        [
+          {
+            "node": "Wait 8 s for more messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 8 s for more messages": {
+      "main": [
+        [
+          {
+            "node": "Read pending messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read pending messages": {
+      "main": [
+        [
+          {
+            "node": "Merge pending messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge pending messages": {
+      "main": [
+        [
+          {
+            "node": "Clear buffer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear buffer": {
+      "main": [
+        [
+          {
+            "node": "Combined message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "search_clinic_documents": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Fallback Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Incoming SMS (Twilio)": {
+      "main": [
+        [
+          {
+            "node": "Verify Twilio signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Twilio signature": {
+      "main": [
+        [
+          {
+            "node": "Valid signature?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid signature?": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge Twilio (empty TwiML)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject (403)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge Twilio (empty TwiML)": {
+      "main": [
+        [
+          {
+            "node": "Should the agent reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should the agent reply?": {
+      "main": [
+        [
+          {
+            "node": "Save to buffer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

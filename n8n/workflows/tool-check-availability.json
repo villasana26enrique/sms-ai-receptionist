@@ -1,0 +1,79 @@
+{
+  "id": "u4zk3B48hPfoFaaa",
+  "name": "Tool: Check availability",
+  "description": "Agent tool: returns the free start times for a service on a given day (dental_clinic.get_available_slots).",
+  "active": false,
+  "nodes": [
+    {
+      "id": "e19d86ea-6ff6-4258-8bdb-b4d3eebddcf4",
+      "name": "When the agent checks availability",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "date",
+              "type": "string"
+            },
+            {
+              "name": "service",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "9dfedd3b-9cf2-4b54-b4ab-acdb677a9ab4",
+      "name": "Get available slots",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.get_available_slots($1::date, $2) AS result;",
+        "options": {
+          "queryReplacement": "={{ [$json.date, $json.service] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When the agent checks availability": {
+      "main": [
+        [
+          {
+            "node": "Get available slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

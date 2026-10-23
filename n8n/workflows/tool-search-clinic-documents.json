@@ -1,0 +1,151 @@
+{
+  "id": "K5dRw9Tn3QxP7mZb",
+  "name": "Tool: Search clinic documents",
+  "description": null,
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "question",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "tool-docs-start",
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "__RAG_SEARCH_URL__",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json.question }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "tool-docs-search",
+      "name": "Search the knowledge base",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "rG3sK8pW2nQ6vL4x",
+          "name": "RAG search API key"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Only what the agent needs: whether the documents answer it, and each passage with its source.\n// The patient's phone number is never sent to the knowledge service: only the question.\nconst r = $input.first().json;\nreturn [{ json: {\n  answerable: r.answerable === true,\n  message: r.message,\n  passages: (r.passages ?? []).map(p => ({ source: p.source, text: p.text })),\n} }];"
+      },
+      "id": "tool-docs-format",
+      "name": "Format for the agent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerable",
+              "name": "answerable",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "message",
+              "name": "message",
+              "value": "The clinic documents cannot be checked right now. Tell the patient you cannot check that at the moment and offer to have a team member follow up, or to call (212) 555-0147.",
+              "type": "string"
+            },
+            {
+              "id": "passages",
+              "name": "passages",
+              "value": "={{ [] }}",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "tool-docs-unavailable",
+      "name": "Search unavailable",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        440,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Search the knowledge base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search the knowledge base": {
+      "main": [
+        [
+          {
+            "node": "Format for the agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search unavailable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {},
+  "nodeGroups": [],
+  "tags": []
+}

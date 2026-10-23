@@ -1,0 +1,75 @@
+{
+  "id": "4e88mmZwNoHCeo16",
+  "name": "Tool: Get my appointments",
+  "description": "Agent tool: returns the upcoming confirmed appointments of the mobile number that is writing (dental_clinic.get_my_appointments).",
+  "active": false,
+  "nodes": [
+    {
+      "id": "3b104ba5-0b14-4efa-a3bb-37cbc157e85d",
+      "name": "When the agent lists appointments",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "phone",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "8b7f1998-d0db-41fa-9edc-211cfd1294ac",
+      "name": "Get patient appointments",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT dental_clinic.get_my_appointments($1) AS result;",
+        "options": {
+          "queryReplacement": "={{ [$json.phone] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When the agent lists appointments": {
+      "main": [
+        [
+          {
+            "node": "Get patient appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "nodeGroups": [],
+  "tags": []
+}

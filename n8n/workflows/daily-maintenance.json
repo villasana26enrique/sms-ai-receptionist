@@ -1,0 +1,73 @@
+{
+  "id": "ltnx0Bx5jpnZAskJ",
+  "name": "Daily maintenance",
+  "description": "Every day at 3 AM (New York): deletes chat history older than 90 days and message-buffer rows older than 1 hour.",
+  "active": false,
+  "nodes": [
+    {
+      "id": "1c3ea0fb-7f85-4364-b0c3-8178583f49b8",
+      "name": "Every day at 3 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "19b56e42-18c6-41e2-b9d2-1df5873dad15",
+      "name": "Apply retention policies",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Chat history is kept 90 days (privacy); buffer rows older than 1 hour were left by a failed run\nSELECT dental_clinic.purge_chat_history(90)          AS chat_messages_deleted,\n       dental_clinic.purge_stale_pending_messages(60) AS stale_buffer_rows_deleted;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "QugGwVrTwVGwNGBq",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every day at 3 AM": {
+      "main": [
+        [
+          {
+            "node": "Apply retention policies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
